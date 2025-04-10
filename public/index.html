@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Text to Speech</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <style>
         :root {
             --primary: #4299e1;
@@ -204,10 +205,70 @@
         }
 
         .audio-container {
-            background: #f7fafc;
+            background: #f1f5f9;
             padding: 1.5rem;
             border-radius: 12px;
             margin-top: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .custom-controls {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .custom-controls button {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all var(--animation-speed) ease;
+        }
+
+        .custom-controls button:hover:not(:disabled) {
+            transform: translateY(-2px);
+        }
+
+        .custom-controls button .material-icons {
+            font-size: 28px;
+        }
+
+        /* Play button */
+        #playBtn {
+            background-color: var(--success);
+        }
+
+        #playBtn:hover:not(:disabled) {
+            background-color: #3da066;
+        }
+
+        /* Pause button */
+        #pauseBtn {
+            background-color: var(--primary);
+        }
+
+        #pauseBtn:hover:not(:disabled) {
+            background-color: var(--primary-dark);
+        }
+
+        /* Stop button */
+        #stopBtn {
+            background-color: var(--error);
+        }
+
+        #stopBtn:hover:not(:disabled) {
+            background-color: #e04747;
+        }
+
+        .custom-controls button:disabled {
+            background-color: var(--border-color);
+            transform: none;
+            opacity: 0.7;
+            cursor: not-allowed;
         }
 
         audio {
@@ -282,7 +343,18 @@
             </div>
         </div>
         <div class="audio-container">
-            <audio id="audioPlayer" controls></audio>
+            <div class="custom-controls">
+                <button onclick="handlePlay()" id="playBtn" disabled title="Play">
+                    <span class="material-icons">play_arrow</span>
+                </button>
+                <button onclick="handlePause()" id="pauseBtn" disabled title="Pause">
+                    <span class="material-icons">pause</span>
+                </button>
+                <button onclick="handleStop()" id="stopBtn" disabled title="Stop">
+                    <span class="material-icons">stop</span>
+                </button>
+            </div>
+            <audio id="audioPlayer" style="display: none;"></audio>
         </div>
     </div>
 
@@ -296,12 +368,16 @@
         const statusContainer = document.getElementById('statusContainer');
         const progressBar = document.getElementById('progressBar');
         const timerElement = document.getElementById('timer');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const stopBtn = document.getElementById('stopBtn');
         let startTime;
         let timerInterval;
 
         // State management
         let isGenerating = false;
         let audioQueue = [];
+        let audioQueueBackup = []; // Add this to store original queue
         let isPlaying = false;
 
         // Update character count
@@ -350,12 +426,17 @@
         }
 
         async function playNextInQueue() {
-            if (audioQueue.length === 0 || isPlaying) return;
+            if (audioQueue.length === 0) {
+                isPlaying = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+                return;
+            }
             
             isPlaying = true;
             const audioData = audioQueue.shift();
             
-            // Convert base64 to blob
             const byteCharacters = atob(audioData);
             const byteNumbers = new Array(byteCharacters.length);
             for (let i = 0; i < byteCharacters.length; i++) {
@@ -364,12 +445,17 @@
             const byteArray = new Uint8Array(byteNumbers);
             const blob = new Blob([byteArray], { type: 'audio/mpeg' });
             
-            // Create URL and play
             const url = URL.createObjectURL(blob);
+            if (audioPlayer.src) {
+                URL.revokeObjectURL(audioPlayer.src);
+            }
             audioPlayer.src = url;
             
             try {
                 await audioPlayer.play();
+                playBtn.disabled = true;
+                pauseBtn.disabled = false;
+                stopBtn.disabled = false;
             } catch (error) {
                 console.error('Playback error:', error);
                 isPlaying = false;
@@ -379,11 +465,41 @@
 
         audioPlayer.addEventListener('ended', () => {
             isPlaying = false;
-            // Clean up the current object URL
-            URL.revokeObjectURL(audioPlayer.src);
-            // Play next audio in queue
-            playNextInQueue();
+            if (audioPlayer.src) {
+                URL.revokeObjectURL(audioPlayer.src);
+            }
+            playNextInQueue(); // This will automatically play the next audio in queue
         });
+
+        function handlePlay() {
+            if (!isPlaying) {
+                playNextInQueue();
+            } else {
+                audioPlayer.play();
+                playBtn.disabled = true;
+                pauseBtn.disabled = false;
+                stopBtn.disabled = false;
+            }
+        }
+
+        function handlePause() {
+            audioPlayer.pause();
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+        }
+
+        function handleStop() {
+            audioPlayer.pause();
+            audioPlayer.currentTime = 0;
+            isPlaying = false;
+            
+            // Reset the queue to original state
+            audioQueue = [...audioQueueBackup];
+            
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            stopBtn.disabled = true;
+        }
 
         async function handleGenerate() {
             if (isGenerating) return;
@@ -403,6 +519,7 @@
             
             // Clear existing queue
             audioQueue = [];
+            audioQueueBackup = []; // Clear backup
             
             try {
                 const eventSource = new EventSource(`/tts?text=${encodeURIComponent(text)}`);
@@ -421,6 +538,7 @@
                     }
                     
                     audioQueue.push(data.audio);
+                    audioQueueBackup.push(data.audio); // Backup each audio segment
                     if (!isPlaying) {
                         playNextInQueue();
                     }
