@@ -128,21 +128,79 @@
             cursor: not-allowed;
         }
 
-        #status {
-            text-align: center;
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            min-height: 20px;
+        .status-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
             margin: 1rem 0;
-            transition: all var(--animation-speed) ease;
+            padding: 1rem;
+            border-radius: 12px;
+            background: var(--primary-light);
         }
 
-        #status.success {
-            color: var(--success);
+        .status-container.success {
+            background: rgba(72, 187, 120, 0.1);
         }
 
-        #status.error {
-            color: var(--error);
+        .status-container.error {
+            background: rgba(245, 101, 101, 0.1);
+        }
+
+        .status-text {
+            font-size: 0.95rem;
+            font-weight: 500;
+        }
+
+        .timer {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            background: var(--white);
+            padding: 0.3rem 0.8rem;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px var(--shadow-color);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: var(--primary);
+            width: 0;
+            transition: width 0.3s ease;
+        }
+
+        .status-container.success .progress-bar-fill {
+            background: var(--success);
+        }
+
+        .status-container.error .progress-bar-fill {
+            background: var(--error);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--primary);
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .audio-container {
@@ -216,7 +274,13 @@
                 <span class="button-text">Generate & Play</span>
             </button>
         </div>
-        <div id="status"></div>
+        <div class="status-container" id="statusContainer">
+            <div class="status-text" id="status"></div>
+            <div class="timer" id="timer">00:00.000</div>
+            <div class="progress-bar">
+                <div class="progress-bar-fill" id="progressBar"></div>
+            </div>
+        </div>
         <div class="audio-container">
             <audio id="audioPlayer" controls></audio>
         </div>
@@ -229,6 +293,11 @@
         const statusEl = document.getElementById('status');
         const audioPlayer = document.getElementById('audioPlayer');
         const charCount = document.querySelector('.char-count');
+        const statusContainer = document.getElementById('statusContainer');
+        const progressBar = document.getElementById('progressBar');
+        const timerElement = document.getElementById('timer');
+        let startTime;
+        let timerInterval;
 
         // State management
         let isGenerating = false;
@@ -242,9 +311,42 @@
             charCount.style.color = length >= 900 ? 'var(--error)' : 'var(--text-secondary)';
         }
 
+        function formatTime(ms) {
+            const minutes = Math.floor(ms / 60000);
+            const seconds = Math.floor((ms % 60000) / 1000);
+            const milliseconds = ms % 1000;
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${milliseconds.toString().padStart(3, '0')}`;
+        }
+
+        function startTimer() {
+            startTime = Date.now();
+            timerInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                timerElement.textContent = formatTime(elapsed);
+            }, 10);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
         function updateStatus(message, type = 'info') {
-            statusEl.textContent = message;
-            statusEl.className = type === 'loading' ? 'loading' : type;
+            statusEl.innerHTML = type === 'loading' ? 
+                `<span class="loading-spinner"></span>${message}` : 
+                message;
+            
+            statusContainer.className = `status-container ${type}`;
+            
+            if (type === 'loading') {
+                timerElement.style.display = 'block';
+            } else {
+                timerElement.style.display = type === 'success' ? 'block' : 'none';
+            }
+        }
+
+        function updateProgress(current, total) {
+            const percentage = (current / total) * 100;
+            progressBar.style.width = `${percentage}%`;
         }
 
         async function playNextInQueue() {
@@ -295,13 +397,14 @@
 
             isGenerating = true;
             generateBtn.disabled = true;
-            updateStatus('Generating audio...', 'loading');
+            updateStatus('Initializing audio generation...', 'loading');
+            startTimer();
+            progressBar.style.width = '0%';
             
             // Clear existing queue
             audioQueue = [];
             
             try {
-                // Create EventSource for SSE connection
                 const eventSource = new EventSource(`/tts?text=${encodeURIComponent(text)}`);
                 
                 eventSource.onmessage = (event) => {
@@ -311,17 +414,19 @@
                         eventSource.close();
                         isGenerating = false;
                         generateBtn.disabled = false;
+                        stopTimer();
                         updateStatus('All audio generated successfully', 'success');
+                        updateProgress(1, 1);
                         return;
                     }
                     
-                    // Add audio to queue and start playing if not already playing
                     audioQueue.push(data.audio);
                     if (!isPlaying) {
                         playNextInQueue();
                     }
                     
                     updateStatus(`Processing sentence ${data.index + 1}/${data.total}...`, 'loading');
+                    updateProgress(data.index + 1, data.total);
                 };
                 
                 eventSource.onerror = (error) => {
@@ -329,6 +434,7 @@
                     eventSource.close();
                     isGenerating = false;
                     generateBtn.disabled = false;
+                    stopTimer();
                     updateStatus('Error generating audio. Please try again.', 'error');
                 };
 
@@ -336,6 +442,7 @@
                 console.error('Error:', error);
                 isGenerating = false;
                 generateBtn.disabled = false;
+                stopTimer();
                 updateStatus(
                     error.message || 'Error generating audio. Please try again.',
                     'error'
