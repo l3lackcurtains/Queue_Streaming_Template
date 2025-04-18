@@ -5,7 +5,7 @@ import { Readable } from 'stream';
 
 const app = express();
 const port: number = 3000;
-const TTS_API_URL: string = 'http://127.0.0.1:40726/generate-audio';
+const TTS_API_URL: string = 'http://127.0.0.1:8383/generate-audio';
 
 app.use(cors());
 app.use(express.static('public'));
